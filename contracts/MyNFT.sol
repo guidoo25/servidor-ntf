@@ -1,5 +1,4 @@
-
-
+// SPDX-License-Identifier: MIT
 pragma solidity >=0.7.0 <0.9.0;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
@@ -28,35 +27,57 @@ contract SimpleNftLowerGas is ERC721, Ownable {
     struct NFTDetails {
         Rareza rareza;
         bool fusionado;
+        string pais;
+        string paisaje;
+        bool enVenta;
+        uint256 precioVenta;
     }
 
     mapping(uint256 => NFTDetails) public nftDetails;
+    mapping(uint256 => string) private tokenURIs;
 
     constructor() ERC721("MyNFT", "MNFT") {
         setHiddenMetadataUri("ipfs://__CID__/hidden.json");
     }
 
-modifier mintCompliance(uint256 _mintAmount) {
-    require(_mintAmount > 0 && _mintAmount <= maxMintAmountPerTx);
-    require(supply.current() + _mintAmount <= maxSupply);
-    _;
-}
-
-
-
-    function totalSupply() public view returns (uint256) {
-        return supply.current();
+    modifier mintCompliance(uint256 _mintAmount) {
+        require(_mintAmount > 0 && _mintAmount <= maxMintAmountPerTx, "Invalid mint amount");
+        require(supply.current() + _mintAmount <= maxSupply, "Max supply exceeded");
+        _;
     }
 
-    function mint(uint256 _mintAmount, Rareza _rareza) public payable mintCompliance(_mintAmount) {
+    function listarNFTsRaros() public view returns (uint256[] memory) {
+        uint256 totalSupply = supply.current();
+        uint256 rareCount = 0;
+
+        for (uint256 i = 1; i <= totalSupply; i++) {
+            if (nftDetails[i].rareza == Rareza.Epico || nftDetails[i].rareza == Rareza.Legendario) {
+                rareCount++;
+            }
+        }
+
+        uint256[] memory rareNFTs = new uint256[](rareCount);
+        uint256 index = 0;
+
+        for (uint256 i = 1; i <= totalSupply; i++) {
+            if (nftDetails[i].rareza == Rareza.Epico || nftDetails[i].rareza == Rareza.Legendario) {
+                rareNFTs[index] = i;
+                index++;
+            }
+        }
+
+        return rareNFTs;
+    }
+
+    function mint(uint256 _mintAmount, Rareza _rareza, string memory _tokenURI, string memory _pais, string memory _paisaje) public payable mintCompliance(_mintAmount) {
         require(!paused, unicode"El contrato está en pausa");
         require(msg.value >= cost * _mintAmount, unicode"Fondos insuficientes");
 
-        _mintLoop(msg.sender, _mintAmount, _rareza);
+        _mintLoop(msg.sender, _mintAmount, _rareza, _tokenURI, _pais, _paisaje);
     }
 
-    function mintForAddress(uint256 _mintAmount, address _receiver, Rareza _rareza) public mintCompliance(_mintAmount) onlyOwner {
-        _mintLoop(_receiver, _mintAmount, _rareza);
+    function mintForAddress(uint256 _mintAmount, address _receiver, Rareza _rareza, string memory _tokenURI, string memory _pais, string memory _paisaje) public mintCompliance(_mintAmount) onlyOwner {
+        _mintLoop(_receiver, _mintAmount, _rareza, _tokenURI, _pais, _paisaje);
     }
 
     function fusionarNFTs(uint256 tokenId1, uint256 tokenId2) public {
@@ -71,7 +92,7 @@ modifier mintCompliance(uint256 _mintAmount) {
         _burn(tokenId2);
 
         Rareza nuevaRareza = Rareza(uint(nftDetails[tokenId1].rareza) + 1);
-        _mintLoop(msg.sender, 1, nuevaRareza);
+        _mintLoop(msg.sender, 1, nuevaRareza, "", "", ""); // Pasa valores vacíos para los NFTs fusionados
     }
 
     function walletOfOwner(address _owner) public view returns (uint256[] memory) {
@@ -101,8 +122,12 @@ modifier mintCompliance(uint256 _mintAmount) {
             return hiddenMetadataUri;
         }
 
-        string memory currentBaseURI = _baseURI();
-        return bytes(currentBaseURI).length > 0 ? string(abi.encodePacked(currentBaseURI, _tokenId.toString(), uriSuffix)) : "";
+        string memory customTokenURI = tokenURIs[_tokenId];
+        return bytes(customTokenURI).length > 0 ? customTokenURI : "";
+    }
+
+    function setTokenURI(uint256 _tokenId, string memory _tokenURI) public onlyOwner {
+        tokenURIs[_tokenId] = _tokenURI;
     }
 
     function setRevealed(bool _state) public onlyOwner {
@@ -135,20 +160,25 @@ modifier mintCompliance(uint256 _mintAmount) {
 
     function withdraw() public onlyOwner {
         (bool os, ) = payable(owner()).call{value: address(this).balance}("");
-        require(os);
+        require(os, "Transfer failed.");
     }
 
-    function _mintLoop(address _receiver, uint256 _mintAmount, Rareza _rareza) internal {
+    function _mintLoop(address _receiver, uint256 _mintAmount, Rareza _rareza, string memory _tokenURI, string memory _pais, string memory _paisaje) internal {
         for (uint256 i = 0; i < _mintAmount; i++) {
             supply.increment();
             uint256 newTokenId = supply.current();
             _safeMint(_receiver, newTokenId);
 
-            // Establecemos los detalles del NFT con rareza
             nftDetails[newTokenId] = NFTDetails({
                 rareza: _rareza,
-                fusionado: false
+                fusionado: false,
+                pais: _pais,
+                paisaje: _paisaje,
+                enVenta: true,       
+                precioVenta: 0.01 ether 
             });
+
+            tokenURIs[newTokenId] = _tokenURI;
         }
     }
 
